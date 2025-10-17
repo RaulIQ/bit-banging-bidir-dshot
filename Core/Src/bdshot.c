@@ -11,55 +11,56 @@ static void read_BDshot_response(uint32_t value, uint8_t motor);
 static bool BDshot_check_checksum(uint16_t value);
 static uint16_t prepare_BDshot_package(uint16_t value);
 static uint16_t calculate_BDshot_checksum(uint16_t value);
+int32_t bdshot_value_to_rpm(uint32_t value, uint8_t motor_poles);
 
 // flags for reception or transmission:
-static bool bdshot_reception_1 = true;
+// static bool bdshot_reception_1 = true;
 
-void DMA2_Stream1_IRQHandler(void)
-{
+// void DMA2_Stream1_IRQHandler(void)
+// {
 
-    if (DMA2->LISR & DMA_LISR_TCIF1)
-    {
-        DMA2->LIFCR |= DMA_LIFCR_CTCIF1;
+//     if (DMA2->LISR & DMA_LISR_TCIF1)
+//     {
+//         DMA2->LIFCR |= DMA_LIFCR_CTCIF1;
 
-        if (bdshot_reception_1)
-        {
-            // set GPIOs as inputs:
-            GPIOC->MODER &= ~GPIO_MODER_MODER9;
-            // set pull up for those pins:
-            GPIOC->PUPDR |= GPIO_PUPDR_PUPDR9_0;
+//         if (bdshot_reception_1)
+//         {
+//             // set GPIOs as inputs:
+//             GPIOC->MODER &= ~GPIO_MODER_MODER9;
+//             // set pull up for those pins:
+//             GPIOC->PUPDR |= GPIO_PUPDR_PUPDR9_0;
 
-            // set timer:
-            TIM3->ARR = DSHOT_BB_FRAME_LENGTH * DSHOT_MODE / BDSHOT_RESPONSE_BITRATE / BDSHOT_RESPONSE_OVERSAMPLING - 1;
-            TIM3->CCR1 = DSHOT_BB_FRAME_LENGTH * DSHOT_MODE / BDSHOT_RESPONSE_BITRATE / BDSHOT_RESPONSE_OVERSAMPLING;
+//             // set timer:
+//             TIM3->ARR = DSHOT_BB_FRAME_LENGTH * DSHOT_MODE / BDSHOT_RESPONSE_BITRATE / BDSHOT_RESPONSE_OVERSAMPLING - 1;
+//             TIM3->CCR1 = DSHOT_BB_FRAME_LENGTH * DSHOT_MODE / BDSHOT_RESPONSE_BITRATE / BDSHOT_RESPONSE_OVERSAMPLING;
 
-            DMA2_Stream1->CR &= ~(DMA_SxCR_DIR);
-            DMA2_Stream1->PAR = (uint32_t)(&(GPIOC->IDR));
-            DMA2_Stream1->M0AR = (uint32_t)(dshot_bb_buffer_1_r);
-            // Main idea:
-            // After sending DShot frame to ESC start receiving GPIO values.
-            // Capture data (probing longer than ESC response).
-            // There is ~33 [us] gap before the response so it is necessary to add more samples:
-            DMA2_Stream1->NDTR = ((int)(33 * BDSHOT_RESPONSE_BITRATE / 1000 + BDSHOT_RESPONSE_LENGTH + 1) * BDSHOT_RESPONSE_OVERSAMPLING);
+//             DMA2_Stream1->CR &= ~(DMA_SxCR_DIR);
+//             DMA2_Stream1->PAR = (uint32_t)(&(GPIOC->IDR));
+//             DMA2_Stream1->M0AR = (uint32_t)(dshot_bb_buffer_1_r);
+//             // Main idea:
+//             // After sending DShot frame to ESC start receiving GPIO values.
+//             // Capture data (probing longer than ESC response).
+//             // There is ~33 [us] gap before the response so it is necessary to add more samples:
+//             DMA2_Stream1->NDTR = ((int)(33 * BDSHOT_RESPONSE_BITRATE / 1000 + BDSHOT_RESPONSE_LENGTH + 1) * BDSHOT_RESPONSE_OVERSAMPLING);
 
-            DMA2_Stream1->CR |= DMA_SxCR_EN;
-            bdshot_reception_1 = false;
-        }
-    }
+//             DMA2_Stream1->CR |= DMA_SxCR_EN;
+//             bdshot_reception_1 = false;
+//         }
+//     }
 
-    if (DMA2->LISR & DMA_LISR_HTIF1)
-    {
-        DMA2->LIFCR |= DMA_LIFCR_CHTIF1;
-    }
-    if (DMA2->LISR & DMA_LISR_DMEIF1)
-    {
-        DMA2->LIFCR |= DMA_LIFCR_CDMEIF1;
-    }
-    if (DMA2->LISR & DMA_LISR_TEIF1)
-    {
-        DMA2->LIFCR |= DMA_LIFCR_CTEIF1;
-    }
-}
+//     if (DMA2->LISR & DMA_LISR_HTIF1)
+//     {
+//         DMA2->LIFCR |= DMA_LIFCR_CHTIF1;
+//     }
+//     if (DMA2->LISR & DMA_LISR_DMEIF1)
+//     {
+//         DMA2->LIFCR |= DMA_LIFCR_CDMEIF1;
+//     }
+//     if (DMA2->LISR & DMA_LISR_TEIF1)
+//     {
+//         DMA2->LIFCR |= DMA_LIFCR_CTEIF1;
+//     }
+// }
 
 void update_motors()
 {
@@ -68,7 +69,7 @@ void update_motors()
 
     fill_bb_BDshot_buffer(prepare_BDshot_package(*motor_1_value_pointer));
 
-    bdshot_reception_1 = true;
+    // bdshot_reception_1 = true;
 
     // set GPIOs as output:
     GPIOC->MODER |= GPIO_MODER_MODER9_0;
@@ -125,6 +126,7 @@ void fill_bb_BDshot_buffer(uint16_t m1_value)
 {
     // Каждый бит уже имеет "падение" в начале и "подъём" после DSHOT_BB_1_LENGTH.
     // Теперь решаем, нужно ли поднять раньше (для бита 0) или оставить низким (для бита 1).
+    m1_value = prepare_BDshot_package(m1_value);
 
     for (uint8_t i = 0; i < DSHOT_BB_BUFFER_LENGTH - 2; i++)  // последние 2 бита — всегда high
     {
@@ -220,20 +222,15 @@ static void fill_bb_BDshot_buffer(uint16_t m1_value, uint16_t m2_value, uint16_t
 }
 #endif
 
-// static void update_motors_rpm()
-// {
-//     // BDshot bit banging reads whole GPIO register.
-//     // Now it's time to create BDshot responses from all motors (made of individual bits).
-//     uint32_t motor_1_response = get_BDshot_response(dshot_bb_buffer_1_4_r, MOTOR_1);
-//     uint32_t motor_2_response = get_BDshot_response(dshot_bb_buffer_2_3_r, MOTOR_2);
-//     uint32_t motor_3_response = get_BDshot_response(dshot_bb_buffer_2_3_r, MOTOR_3);
-//     uint32_t motor_4_response = get_BDshot_response(dshot_bb_buffer_1_4_r, MOTOR_4);
+void print_motors_rpm()
+{
+    // BDshot bit banging reads whole GPIO register.
+    // Now it's time to create BDshot responses from all motors (made of individual bits).
+    uint32_t motor_1_response = get_BDshot_response(dshot_bb_buffer_1_r, MOTOR_1);
 
-//     read_BDshot_response(motor_1_response, 1);
-//     read_BDshot_response(motor_2_response, 2);
-//     read_BDshot_response(motor_3_response, 3);
-//     read_BDshot_response(motor_4_response, 4);
-// }
+    int32_t rpm = bdshot_value_to_rpm(motor_1_response, 1);
+    printf("RPM = %d\n", (int)rpm);
+}
 
 static uint32_t get_BDshot_response(uint32_t raw_buffer[], const uint8_t motor_shift)
 {
@@ -289,44 +286,57 @@ static uint32_t get_BDshot_response(uint32_t raw_buffer[], const uint8_t motor_s
     }
 }
 
-static void read_BDshot_response(uint32_t value, uint8_t motor)
+int32_t bdshot_value_to_rpm(uint32_t value, uint8_t motor_poles)
 {
-    // BDshot frame contain 21 bytes but first is always 0 (used only for detection).
-    // Next 20 bits are 4 sets of 5-bits which are mapped with 4-bits real value.
-    // After all, value is 16-bit long with 12-bit eRPM value (actually it is a period of eRPM) and 4-bit CRC.
-    // 12-bit eRPM value has 3 first bits od left shifting and 9-bit mantisa.
-
-    // put nibbles in the array in places of mapped values (to reduce empty elements smallest mapped value will always be subtracted)
-    // now it is easy to create real value - mapped value indicate array element which contain nibble value:
-#define iv 0xFFFFFFFF
+    const uint32_t IV = 0xFFFFFFFFu;
     static const uint32_t GCR_table[32] = {
-        iv, iv, iv, iv, iv, iv, iv, iv, iv, 9, 10, 11, iv, 13, 14, 15,
-        iv, iv, 2, 3, iv, 5, 6, 7, iv, 0, 8, 1, iv, 4, 12, iv};
+        IV, IV, IV, IV, IV, IV, IV, IV, IV, 9, 10, 11, IV, 13, 14, 15,
+        IV, IV, 2, 3, IV, 5, 6, 7, IV, 0, 8, 1, IV, 4, 12, IV
+    };
 
-    value = (value ^ (value >> 1)); // now we have GCR value
+    if (motor_poles == 0) return -1; // защита от деления на ноль
 
-    uint32_t decoded_value = GCR_table[(value & 0x1F)];
-    decoded_value |= GCR_table[((value >> 5) & 0x1F)] << 4;
-    decoded_value |= GCR_table[((value >> 10) & 0x1F)] << 8;
-    decoded_value |= GCR_table[((value >> 15) & 0x1F)] << 12;
+    // Gray → Binary
+    value = (value ^ (value >> 1));
 
-    // if wrongly decoded decoded_value will be bigger than uint16_t:
-    if (decoded_value < 0xFFFF && BDshot_check_checksum(decoded_value))
-    {
-        // if checksum is correct real save real RPM.
-        // value sent by ESC is a period between each pole changes [us].
-        // to achive eRPM we need to find out how many of these changes are in one minute.
-        // eRPM = (60*1000 000)/T_us next RPM can be achived -> RPM = eRPM/(poles/2):
+    // Раскодировать 4 ниббла по таблице
+    uint32_t nib0 = GCR_table[(value & 0x1Fu)];
+    if (nib0 == IV) return -1;
+    uint32_t nib1 = GCR_table[((value >> 5) & 0x1Fu)];
+    if (nib1 == IV) return -1;
+    uint32_t nib2 = GCR_table[((value >> 10) & 0x1Fu)];
+    if (nib2 == IV) return -1;
+    uint32_t nib3 = GCR_table[((value >> 15) & 0x1Fu)];
+    if (nib3 == IV) return -1;
 
-        motors_rpm[motor - 1] = ((decoded_value & 0x1FF0) >> 4) << (decoded_value >> 13);      // cut off CRC and add shifting - this is period in [us]
-        motors_rpm[motor - 1] = 60 * 1000000 / motors_rpm[motor - 1] * 2 / MOTOR_POLES_NUMBER; // convert to RPM
-        motors_error[motor - 1] = 0.9 * motors_error[motor - 1];                               // reduce motor error
-    }
-    else
-    {
-        motors_error[motor - 1] = 0.9 * motors_error[motor - 1] + 10; // increase motor error
-    }
+    uint32_t decoded_value = nib0 | (nib1 << 4) | (nib2 << 8) | (nib3 << 12);
+
+    // Проверка CRC
+    if (decoded_value >= 0xFFFFu) return -1;
+    if (!BDshot_check_checksum((uint16_t)decoded_value)) return -1;
+
+    // Извлекаем мантиссу и сдвиг
+    uint32_t mantissa = (decoded_value & 0x1FF0u) >> 4; // 9 бит
+    uint32_t shift    = (decoded_value >> 13) & 0x7u;   // 3 бита
+
+    if (mantissa == 0) return -1;
+
+    // Период в микросекундах
+    uint32_t period_us = mantissa << shift;
+    if (period_us == 0) return -1;
+
+    // eRPM = (60 * 1_000_000) / period_us
+    // RPM = eRPM * 2 / motor_poles
+    // без использования float — безопасно для микроконтроллера
+    uint64_t eRPM = (60ULL * 1000000ULL) / period_us;
+    uint64_t rpm  = (eRPM * 2ULL) / motor_poles;
+
+    // ограничим диапазон чтобы не переполнить int32_t
+    if (rpm > 2147483647ULL) rpm = 2147483647ULL;
+
+    return (int32_t)rpm;
 }
+
 
 static bool BDshot_check_checksum(uint16_t value)
 {
@@ -341,21 +351,46 @@ static bool BDshot_check_checksum(uint16_t value)
     }
 }
 
+// static uint16_t prepare_BDshot_package(uint16_t value)
+// {
+//     // value is in range of 2000-4000 so I need to transform it into Dshot range (48-2047)
+//     value -= 1953;
+//     if (value > 0 && value < 48)
+//     {
+//         value = 48;
+//     }
+//     return ((value << 5) | calculate_BDshot_checksum(value));
+// }
+
+// static uint16_t calculate_BDshot_checksum(uint16_t value)
+// {
+//     // 12th bit for telemetry on/off (1/0):
+//     value = value << 0;
+
+//     return (~(value ^ (value >> 4) ^ (value >> 8))) & 0x0F;
+// }
+
 static uint16_t prepare_BDshot_package(uint16_t value)
 {
-    // value is in range of 2000-4000 so I need to transform it into Dshot range (48-2047)
     value -= 1953;
-    if (value > 0 && value < 48)
-    {
-        value = 48;
-    }
-    return ((value << 5) | calculate_BDshot_checksum(value));
+    if (value > 0 && value < 48) value = 48;
+
+    uint16_t packet = value << 1;      // 11 бит значения + 1 бит телеметрии (0)
+    uint16_t checksum = calculate_BDshot_checksum(packet);
+
+    return (packet << 4) | checksum;   // сдвигаем packet на 4 бита, чтобы освободить место для CRC
 }
 
-static uint16_t calculate_BDshot_checksum(uint16_t value)
+static uint16_t calculate_BDshot_checksum(uint16_t packet)
 {
-    // 12th bit for telemetry on/off (1/0):
-    value = value << 0;
+    uint16_t csum = 0;
+    uint16_t csum_data = packet;
 
-    return (~(value ^ (value >> 4) ^ (value >> 8))) & 0x0F;
+    for (int i = 0; i < 3; i++) {       // берём три группы по 4 бита
+        csum ^= (csum_data & 0xF);
+        csum_data >>= 4;
+    }
+
+
+    return ~csum & 0x0F;
 }

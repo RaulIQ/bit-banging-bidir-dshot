@@ -112,27 +112,6 @@ static void timer1_init(void) {
   TIM1->CR1  |= TIM_CR1_CEN;  // start counter
 }
 
-
-static void setup_DMA()
-{
-	RCC->AHB1ENR |= RCC_AHB1ENR_DMA1EN;
-
-	// TIM1_UP -> DMA2 Stream2 Channel1 (RM0410, Table 32)
-  DMA2_Stream1->CR &= ~DMA_SxCR_EN;
-  while (DMA2_Stream1->CR & DMA_SxCR_EN); // wait until disabled
-
-  // Clear all pending flags
-  DMA2->LIFCR = (0x3D << 0); // clear Stream2 flags (bits [5:0])
-
-	DMA2_Stream1->CR =
-        (6U << DMA_SxCR_CHSEL_Pos)   // Channel 5 = TIM1_UP
-      | DMA_SxCR_MINC                // increment memory
-      // | DMA_SxCR_DIR_0               // mem->periph
-      | DMA_SxCR_PL_1                // high priority
-      | DMA_SxCR_MSIZE_1             // mem = 32-bit
-      | DMA_SxCR_PSIZE_1;            // periph = 32-bit
-}
-
 void setup_NVIC()
 {
 	//	nvic DMA interrupts enable:
