@@ -48,7 +48,7 @@ int main(void)
 
     preset_bb_Dshot_buffer_single();
 
-    uint16_t motor_val = 1953;
+    uint16_t motor_val = 0;
 
     uint32_t tickstart = HAL_GetTick();
     uint32_t wait = 5000;
@@ -58,19 +58,19 @@ int main(void)
     }
     while ((HAL_GetTick() - tickstart) < wait)
     {
-        fill_bb_BDshot_buffer(motor_val);
+        fill_bb_BDshot_buffer(motor_val, true, false);
         update_dma();
         HAL_Delay(3);
     }
 
-    motor_val = 2500;
+    motor_val = 500;
 
     uint8_t i = 0;
     int32_t rpm_sum = 0;
 
     while (1)
     {
-        fill_bb_BDshot_buffer(motor_val);
+        fill_bb_BDshot_buffer(motor_val, true, true);
         update_dma();
         HAL_Delay(3);
 

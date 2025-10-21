@@ -11,6 +11,7 @@ static void read_BDshot_response(uint32_t value, uint8_t motor);
 static bool BDshot_check_checksum(uint16_t value);
 static uint16_t prepare_BDshot_package(uint16_t value);
 static uint16_t calculate_BDshot_checksum(uint16_t value);
+static uint16_t prepare_BDshot_package_3D(uint16_t throttle, bool reverse);
 int32_t bdshot_value_to_rpm(uint32_t value, uint8_t motor_poles);
 
 // flags for reception or transmission:
@@ -100,11 +101,14 @@ void preset_bb_Dshot_buffer_single()
     }
 }
 
-void fill_bb_BDshot_buffer(uint16_t m1_value)
+void fill_bb_BDshot_buffer(uint16_t m1_value, bool mode3D, bool reverse)
+
 {
-    // Каждый бит уже имеет "падение" в начале и "подъём" после DSHOT_BB_1_LENGTH.
-    // Теперь решаем, нужно ли поднять раньше (для бита 0) или оставить низким (для бита 1).
-    m1_value = prepare_BDshot_package(m1_value);
+    if (mode3D) {
+        m1_value = prepare_BDshot_package_3D(m1_value, reverse);
+    } else {
+        m1_value = prepare_BDshot_package(m1_value);
+    }
 
     for (uint8_t i = 0; i < DSHOT_BB_BUFFER_LENGTH - 2; i++)  // последние 2 бита — всегда high
     {
@@ -256,14 +260,39 @@ static bool BDshot_check_checksum(uint16_t value)
 
 static uint16_t prepare_BDshot_package(uint16_t value)
 {
-    value -= 1953;
     if (value > 0 && value < 48) value = 48;
 
-    uint16_t packet = value << 1;      // 11 бит значения + 1 бит телеметрии (0)
+    uint16_t packet = value << 1;
     uint16_t checksum = calculate_BDshot_checksum(packet);
 
-    return (packet << 4) | checksum;   // сдвигаем packet на 4 бита, чтобы освободить место для CRC
+    return (packet << 4) | checksum;
 }
+
+static uint16_t prepare_BDshot_package_3D(uint16_t throttle, bool reverse)
+{
+    // Минимальное значение — 48 (как в обычном DShot)
+    if (throttle == 0) {
+        uint16_t packet = throttle << 1;
+        uint16_t checksum = calculate_BDshot_checksum(packet);
+
+        return (packet << 4) | checksum;
+    }
+    if (throttle > 0 && throttle < 48)
+        throttle = 48;
+    if (throttle > 1047)
+        throttle = 1047; // защита от выхода за диапазон
+
+    // В 3D режиме: если reverse == true → добавляем 1000
+    uint16_t value = reverse ? (throttle + 1000) : throttle;
+
+    // Формирование пакета
+    uint16_t packet = value << 1;
+    uint16_t checksum = calculate_BDshot_checksum(packet);
+
+    return (packet << 4) | checksum;
+}
+
+
 
 static uint16_t calculate_BDshot_checksum(uint16_t packet)
 {
