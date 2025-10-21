@@ -14,92 +14,70 @@ static uint16_t calculate_BDshot_checksum(uint16_t value);
 int32_t bdshot_value_to_rpm(uint32_t value, uint8_t motor_poles);
 
 // flags for reception or transmission:
-// static bool bdshot_reception_1 = true;
+static bool bdshot_reception_1 = true;
 
-// void DMA2_Stream1_IRQHandler(void)
-// {
-
-//     if (DMA2->LISR & DMA_LISR_TCIF1)
-//     {
-//         DMA2->LIFCR |= DMA_LIFCR_CTCIF1;
-
-//         if (bdshot_reception_1)
-//         {
-//             // set GPIOs as inputs:
-//             GPIOC->MODER &= ~GPIO_MODER_MODER9;
-//             // set pull up for those pins:
-//             GPIOC->PUPDR |= GPIO_PUPDR_PUPDR9_0;
-
-//             // set timer:
-//             TIM3->ARR = DSHOT_BB_FRAME_LENGTH * DSHOT_MODE / BDSHOT_RESPONSE_BITRATE / BDSHOT_RESPONSE_OVERSAMPLING - 1;
-//             TIM3->CCR1 = DSHOT_BB_FRAME_LENGTH * DSHOT_MODE / BDSHOT_RESPONSE_BITRATE / BDSHOT_RESPONSE_OVERSAMPLING;
-
-//             DMA2_Stream1->CR &= ~(DMA_SxCR_DIR);
-//             DMA2_Stream1->PAR = (uint32_t)(&(GPIOC->IDR));
-//             DMA2_Stream1->M0AR = (uint32_t)(dshot_bb_buffer_1_r);
-//             // Main idea:
-//             // After sending DShot frame to ESC start receiving GPIO values.
-//             // Capture data (probing longer than ESC response).
-//             // There is ~33 [us] gap before the response so it is necessary to add more samples:
-//             DMA2_Stream1->NDTR = ((int)(33 * BDSHOT_RESPONSE_BITRATE / 1000 + BDSHOT_RESPONSE_LENGTH + 1) * BDSHOT_RESPONSE_OVERSAMPLING);
-
-//             DMA2_Stream1->CR |= DMA_SxCR_EN;
-//             bdshot_reception_1 = false;
-//         }
-//     }
-
-//     if (DMA2->LISR & DMA_LISR_HTIF1)
-//     {
-//         DMA2->LIFCR |= DMA_LIFCR_CHTIF1;
-//     }
-//     if (DMA2->LISR & DMA_LISR_DMEIF1)
-//     {
-//         DMA2->LIFCR |= DMA_LIFCR_CDMEIF1;
-//     }
-//     if (DMA2->LISR & DMA_LISR_TEIF1)
-//     {
-//         DMA2->LIFCR |= DMA_LIFCR_CTEIF1;
-//     }
-// }
-
-void update_motors()
+void DMA2_Stream1_IRQHandler(void)
 {
-    // prepare for sending:
-    // update_motors_rpm();
+    if (DMA2->LISR & DMA_LISR_TCIF1)
+    {
+        DMA2->LIFCR |= DMA_LIFCR_CTCIF1;
 
-    fill_bb_BDshot_buffer(prepare_BDshot_package(*motor_1_value_pointer));
+        if (bdshot_reception_1)
+        {
+            // set GPIOs as inputs:
+            GPIOC->MODER &= ~GPIO_MODER_MODER9;
+            // set pull up for those pins:
+            GPIOC->PUPDR |= GPIO_PUPDR_PUPDR9_0;
 
-    // bdshot_reception_1 = true;
+            // set timer:
+            TIM1->ARR = DSHOT_BB_FRAME_LENGTH * DSHOT_MODE / BDSHOT_RESPONSE_BITRATE / BDSHOT_RESPONSE_OVERSAMPLING - 1;
+            TIM1->CCR1 = DSHOT_BB_FRAME_LENGTH * DSHOT_MODE / BDSHOT_RESPONSE_BITRATE / BDSHOT_RESPONSE_OVERSAMPLING;
 
-    // set GPIOs as output:
+            DMA2_Stream1->CR &= ~(DMA_SxCR_DIR);
+            DMA2_Stream1->PAR = (uint32_t)(&(GPIOC->IDR));
+            DMA2_Stream1->M0AR = (uint32_t)(dshot_bb_buffer_1_r);
+            // Main idea:
+            // After sending DShot frame to ESC start receiving GPIO values.
+            // Capture data (probing longer than ESC response).
+            // There is ~33 [us] gap before the response so it is necessary to add more samples:
+            DMA2_Stream1->NDTR = ((int)(33 * BDSHOT_RESPONSE_BITRATE / 1000 + BDSHOT_RESPONSE_LENGTH + 1) * BDSHOT_RESPONSE_OVERSAMPLING);
+
+            DMA2_Stream1->CR |= DMA_SxCR_EN;
+            bdshot_reception_1 = false;
+        }
+    }
+    
+    uint32_t isr = DMA2->LISR;
+    if (isr & (DMA_LISR_TCIF1 | DMA_LISR_HTIF1 | DMA_LISR_TEIF1 | DMA_LISR_DMEIF1))
+    {
+        DMA2->LIFCR = DMA_LIFCR_CTCIF1
+                    | DMA_LIFCR_CHTIF1
+                    | DMA_LIFCR_CTEIF1
+                    | DMA_LIFCR_CDMEIF1;
+    }
+}
+
+void update_dma(void) {
     GPIOC->MODER |= GPIO_MODER_MODER9_0;
 
-    DMA2_Stream1->CR |= DMA_SxCR_DIR_0;
-    
-    DMA2_Stream1->PAR = (uint32_t)(&(GPIOC->BSRR));
-    DMA2_Stream1->M0AR = (uint32_t)(dshot_bb_buffer_1);
-    DMA2_Stream1->NDTR = DSHOT_BB_BUFFER_LENGTH * DSHOT_BB_FRAME_SECTIONS;
-
-    // Main idea:
-    // Every bit frame is divided in sections and for each section DMA request is generated.
-    // After some sections (at beginning, after 0-bit time and after 1-bit time) to GPIO register can be sent value to set 1 or to set 0.
-    // For rest of the sections 0x0 is sent so GPIOs don't change values.
-    // It uses only 1 CCR on each timer.
-    // Idea for reception is the same.
-
-    //	TIM1 setup:
     TIM1->CR1 &= ~TIM_CR1_CEN;
-    TIM1->ARR = DSHOT_BB_FRAME_LENGTH / DSHOT_BB_FRAME_SECTIONS - 1;
     TIM1->CCR1 = DSHOT_BB_FRAME_LENGTH / DSHOT_BB_FRAME_SECTIONS;
+	TIM1->ARR = DSHOT_BB_FRAME_LENGTH / DSHOT_BB_FRAME_SECTIONS - 1;
 
-    //  send:
+
+    DMA2_Stream1->CR &= ~DMA_SxCR_EN;
+    // while (DMA2_Stream1->CR & DMA_SxCR_EN);
+    DMA2_Stream1->CR |= DMA_SxCR_DIR_0;
+    DMA2_Stream1->PAR  = (uint32_t)&GPIOC->BSRR;
+    DMA2_Stream1->M0AR = (uint32_t)dshot_bb_buffer_1;
+    DMA2_Stream1->NDTR = DSHOT_BB_BUFFER_LENGTH * DSHOT_BB_FRAME_SECTIONS;
     DMA2_Stream1->CR |= DMA_SxCR_EN;
 
     TIM1->EGR |= TIM_EGR_UG;
     TIM1->CR1 |= TIM_CR1_CEN;
-}
 
-#if defined(BIT_BANGING_V1)
+    bdshot_reception_1 = true;
+}
 
 void preset_bb_Dshot_buffer_single()
 {
@@ -147,89 +125,14 @@ void fill_bb_BDshot_buffer(uint16_t m1_value)
     }
 }
 
-#elif defined(BIT_BANGING_V2)
-
-void preset_bb_BDshot_buffers()
-{
-
-    // this values are constant so they can be set once in the setup rutine:
-
-    // make 2 high frames after Dshot frame:
-    for (uint8_t i = 0; i < DSHOT_BB_FRAME_SECTIONS * 2; i++)
-    {
-        dshot_bb_buffer_1_4[(DSHOT_BUFFER_LENGTH)*DSHOT_BB_FRAME_SECTIONS - i - 1] = GPIO_BSRR_BS_0 << MOTOR_1 | GPIO_BSRR_BS_0 << MOTOR_4;
-        dshot_bb_buffer_2_3[(DSHOT_BUFFER_LENGTH)*DSHOT_BB_FRAME_SECTIONS - i - 1] = GPIO_BSRR_BS_0 << MOTOR_2 | GPIO_BSRR_BS_0 << MOTOR_3;
-    }
-    for (uint8_t i = 0; i < (DSHOT_BB_BUFFER_LENGTH - 2); i++) // last 2 bits are always high (logic 0)
-    {
-        //  first section always lower edge:
-        dshot_bb_buffer_1_4[i * DSHOT_BB_FRAME_SECTIONS] = GPIO_BSRR_BR_0 << MOTOR_1 | GPIO_BSRR_BR_0 << MOTOR_4;
-        dshot_bb_buffer_2_3[i * DSHOT_BB_FRAME_SECTIONS] = GPIO_BSRR_BR_0 << MOTOR_2 | GPIO_BSRR_BR_0 << MOTOR_3;
-
-        // last section always rise edge:
-        dshot_bb_buffer_1_4[i * DSHOT_BB_FRAME_SECTIONS + 2] = GPIO_BSRR_BS_0 << MOTOR_1 | GPIO_BSRR_BS_0 << MOTOR_4;
-        dshot_bb_buffer_2_3[i * DSHOT_BB_FRAME_SECTIONS + 2] = GPIO_BSRR_BS_0 << MOTOR_2 | GPIO_BSRR_BS_0 << MOTOR_3;
-    }
-}
-
-static void fill_bb_BDshot_buffer(uint16_t m1_value, uint16_t m2_value, uint16_t m3_value,
-                                  uint16_t m4_value)
-{
-    // each bite frame is divided in sections where slope can vary:
-    for (uint8_t i = 0; i < (DSHOT_BB_BUFFER_LENGTH - 2); i++) // last 2 bits are always high (logic 0)
-    {
-        if ((1 << (DSHOT_BB_BUFFER_LENGTH - 3 - i)) & m1_value)
-        {
-            // if bit is one send 0x00 so that GPIOs output will not change (will stay low):
-            dshot_bb_buffer_1_4[i * DSHOT_BB_FRAME_SECTIONS + 1] = 0x00;
-        }
-        else
-        {
-            // if bit is zero set high:
-            dshot_bb_buffer_1_4[i * DSHOT_BB_FRAME_SECTIONS + 1] = GPIO_BSRR_BS_0 << MOTOR_1;
-        }
-        if ((1 << (DSHOT_BB_BUFFER_LENGTH - 3 - i)) & m2_value)
-        {
-            // if bit is one send 0x00 so that GPIOs output will not change (will stay low):
-            dshot_bb_buffer_2_3[i * DSHOT_BB_FRAME_SECTIONS + 1] = 0x00;
-        }
-        else
-        {
-            // if bit is zero set high:
-            dshot_bb_buffer_2_3[i * DSHOT_BB_FRAME_SECTIONS + 1] = GPIO_BSRR_BS_0 << MOTOR_2;
-        }
-        if ((1 << (DSHOT_BB_BUFFER_LENGTH - 3 - i)) & m3_value)
-        {
-            // if bit is one send 0 so that GPIOs output will not change (will stay low):
-            dshot_bb_buffer_2_3[i * DSHOT_BB_FRAME_SECTIONS + 1] |= 0x00;
-        }
-        else
-        {
-            // if bit is zero set high:
-            dshot_bb_buffer_2_3[i * DSHOT_BB_FRAME_SECTIONS + 1] |= GPIO_BSRR_BS_0 << MOTOR_3;
-        }
-        if ((1 << (DSHOT_BB_BUFFER_LENGTH - 3 - i)) & m4_value)
-        {
-            // if bit is one send 0 so that GPIOs output will not change (will stay low):
-            dshot_bb_buffer_1_4[i * DSHOT_BB_FRAME_SECTIONS + 1] |= 0x00;
-        }
-        else
-        {
-            // if bit is zero set high:
-            dshot_bb_buffer_1_4[i * DSHOT_BB_FRAME_SECTIONS + 1] |= GPIO_BSRR_BS_0 << MOTOR_4;
-        }
-    }
-}
-#endif
-
-void print_motors_rpm()
+int32_t get_motors_rpm(viod)
 {
     // BDshot bit banging reads whole GPIO register.
     // Now it's time to create BDshot responses from all motors (made of individual bits).
     uint32_t motor_1_response = get_BDshot_response(dshot_bb_buffer_1_r, MOTOR_1);
 
-    int32_t rpm = bdshot_value_to_rpm(motor_1_response, 1);
-    printf("RPM = %d\n", (int)rpm);
+    int32_t rpm = bdshot_value_to_rpm(motor_1_response, 14);
+    return rpm;
 }
 
 static uint32_t get_BDshot_response(uint32_t raw_buffer[], const uint8_t motor_shift)
@@ -321,7 +224,7 @@ int32_t bdshot_value_to_rpm(uint32_t value, uint8_t motor_poles)
 
     if (mantissa == 0) return -1;
 
-    // Период в микросекундах
+    // Период в микросекундахstatic void setup_GPIOB();	// GPIOB (pin 0 - motor; pin 1 - motor)
     uint32_t period_us = mantissa << shift;
     if (period_us == 0) return -1;
 
@@ -350,25 +253,6 @@ static bool BDshot_check_checksum(uint16_t value)
         return false;
     }
 }
-
-// static uint16_t prepare_BDshot_package(uint16_t value)
-// {
-//     // value is in range of 2000-4000 so I need to transform it into Dshot range (48-2047)
-//     value -= 1953;
-//     if (value > 0 && value < 48)
-//     {
-//         value = 48;
-//     }
-//     return ((value << 5) | calculate_BDshot_checksum(value));
-// }
-
-// static uint16_t calculate_BDshot_checksum(uint16_t value)
-// {
-//     // 12th bit for telemetry on/off (1/0):
-//     value = value << 0;
-
-//     return (~(value ^ (value >> 4) ^ (value >> 8))) & 0x0F;
-// }
 
 static uint16_t prepare_BDshot_package(uint16_t value)
 {

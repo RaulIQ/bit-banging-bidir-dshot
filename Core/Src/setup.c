@@ -7,13 +7,9 @@
 #include <stm32f767xx.h>
 #include "main.h"
 
-
-static void setup_HSE();
-static void setup_PLL();
 static void setup_GPIOC();	// GPIOA (pin 2 - motor; pin 3 - motor)
-static void setup_GPIOB();	// GPIOB (pin 0 - motor; pin 1 - motor)
 static void timer1_init(); // Bidirectional DShot
-static void setup_DMA();
+static void dma_init();
 static void SystemClock_Config();
 
 void setup()
@@ -21,10 +17,10 @@ void setup()
 	// basic configuration:
 	SystemClock_Config();
 	// BDshot specific setup:
-  // timer1_init();
+  setup_NVIC();
+  timer1_init();
   setup_GPIOC();
-	// setup_DMA();
-  // setup_NVIC();
+	dma_init();
 }
 
 static void SystemClock_Config()
@@ -98,9 +94,9 @@ static void timer1_init(void) {
 
   TIM1->CCR1 = DSHOT_BB_FRAME_LENGTH / DSHOT_BB_FRAME_SECTIONS;
 
-	//	TIM1 is 168 [MHz]:
-	TIM1->PSC = 216000 / DSHOT_MODE / DSHOT_BB_FRAME_LENGTH - 1;
-	TIM1->ARR = DSHOT_BB_FRAME_LENGTH / DSHOT_BB_FRAME_SECTIONS - 1;
+  //	TIM1 is 216 [MHz]:
+  TIM1->PSC = 216000 / DSHOT_MODE / DSHOT_BB_FRAME_LENGTH - 1;
+  TIM1->ARR = DSHOT_BB_FRAME_LENGTH / DSHOT_BB_FRAME_SECTIONS - 1;
 
   TIM1->CCER |= TIM_CCER_CC1E;
 
@@ -110,6 +106,33 @@ static void timer1_init(void) {
 
   TIM1->EGR |= TIM_EGR_UG;   // generate first update event
   TIM1->CR1  |= TIM_CR1_CEN;  // start counter
+}
+
+static void dma_init(void) {
+  RCC->AHB1ENR |= RCC_AHB1ENR_DMA2EN;
+
+  DMA2_Stream1->CR &= ~DMA_SxCR_EN;
+  while (DMA2_Stream1->CR & DMA_SxCR_EN); // wait until disabled
+
+  // Clear all pending flags
+  DMA2->LIFCR = (0x3D << 0); // clear Stream2 flags (bits [5:0])
+
+  DMA2_Stream1->PAR  = (uint32_t)&GPIOC->BSRR;
+  DMA2_Stream1->M0AR = (uint32_t)dshot_bb_buffer_1;
+  DMA2_Stream1->NDTR = DSHOT_BB_BUFFER_LENGTH * DSHOT_BB_FRAME_SECTIONS;
+
+  DMA2_Stream1->CR =
+          (6U << DMA_SxCR_CHSEL_Pos)   // Channel 6 = TIM1_CH1
+      | DMA_SxCR_MINC                // increment memory
+      | DMA_SxCR_DIR_0               // mem->periph
+      // | DMA_SxCR_CIRC     /           // circular
+      | DMA_SxCR_PL_1                // high priority
+      | DMA_SxCR_MSIZE_1             // mem = 32-bit
+      | DMA_SxCR_PSIZE_1;            // periph = 32-bit
+
+  DMA2_Stream1->FCR = 0x00000000u;
+  DMA2_Stream1->CR |= DMA_SxCR_TCIE;
+  DMA2_Stream1->CR |= DMA_SxCR_EN;   // enable stream
 }
 
 void setup_NVIC()
